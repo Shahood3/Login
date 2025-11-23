@@ -13,8 +13,10 @@ class User:
             # Validate required fields
             required_fields = ['first_name', 'last_name', 'email', 'password', 'user_type']
             for field in required_fields:
-                if field not in user_data or not user_data[field].strip():
+                if field not in user_data:
                     return {'error': f'{field.replace("_", " ").title()} is required'}, 400
+                if not str(user_data[field]).strip():
+                    return {'error': f'{field.replace("_", " ").title()} cannot be empty'}, 400
             
             # Validate email format
             if not self._is_valid_email(user_data['email']):
@@ -87,6 +89,8 @@ class User:
                 
         except Exception as e:
             print(f"Error creating user: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return {'error': 'Internal server error'}, 500
     
     def get_user_by_email(self, email):
@@ -103,10 +107,16 @@ class User:
     def get_user_by_id(self, user_id):
         """Get user by ID"""
         try:
-            user = self.collection.find_one({'_id': ObjectId(user_id)})
+            # Handle both string and ObjectId inputs
+            if isinstance(user_id, str):
+                object_id = ObjectId(user_id)
+            else:
+                object_id = user_id
+                
+            user = self.collection.find_one({'_id': object_id})
             if user:
                 user['_id'] = str(user['_id'])
-                user.pop('password_hash', None)  # Remove password hash from response
+                user.pop('password_hash', None)
             return user
         except Exception as e:
             print(f"Error getting user by ID: {str(e)}")
@@ -116,18 +126,32 @@ class User:
         """Verify user password"""
         try:
             user = self.collection.find_one({'email': email.lower()})
-            if user and check_password_hash(user['password_hash'], password):
-                return True
-            return False
+            if not user:
+                print(f"User not found for email: {email}")
+                return False
+            if not user.get('password_hash'):
+                print(f"No password hash found for user: {email}")
+                return False
+            result = check_password_hash(user['password_hash'], password)
+            print(f"Password verification result for {email}: {result}")
+            return result
         except Exception as e:
             print(f"Error verifying password: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return False
     
     def update_last_login(self, user_id):
         """Update user's last login timestamp"""
         try:
+            # Handle both string and ObjectId inputs
+            if isinstance(user_id, str):
+                object_id = ObjectId(user_id)
+            else:
+                object_id = user_id
+                
             self.collection.update_one(
-                {'_id': ObjectId(user_id)},
+                {'_id': object_id},
                 {'$set': {'last_login': datetime.utcnow(), 'updated_at': datetime.utcnow()}}
             )
         except Exception as e:
@@ -159,6 +183,12 @@ class User:
     def update_user(self, user_id, update_data):
         """Update user information"""
         try:
+            # Handle both string and ObjectId inputs
+            if isinstance(user_id, str):
+                object_id = ObjectId(user_id)
+            else:
+                object_id = user_id
+                
             # Remove sensitive fields that shouldn't be updated directly
             update_data.pop('password_hash', None)
             update_data.pop('_id', None)
@@ -167,7 +197,7 @@ class User:
             update_data['updated_at'] = datetime.utcnow()
             
             result = self.collection.update_one(
-                {'_id': ObjectId(user_id)},
+                {'_id': object_id},
                 {'$set': update_data}
             )
             
@@ -179,8 +209,14 @@ class User:
     def delete_user(self, user_id):
         """Soft delete user (set is_active to False)"""
         try:
+            # Handle both string and ObjectId inputs
+            if isinstance(user_id, str):
+                object_id = ObjectId(user_id)
+            else:
+                object_id = user_id
+                
             result = self.collection.update_one(
-                {'_id': ObjectId(user_id)},
+                {'_id': object_id},
                 {'$set': {'is_active': False, 'updated_at': datetime.utcnow()}}
             )
             return result.modified_count > 0
@@ -199,83 +235,3 @@ class User:
         digits_only = re.sub(r'\D', '', phone)
         # Check if it's exactly 10 digits
         return len(digits_only) == 10
-    
-    # Add this method to your User model class in models/user.py
-
-def get_user_by_id(self, user_id):
-    """Get user by ID"""
-    try:
-        # Handle both string and ObjectId inputs
-        if isinstance(user_id, str):
-            object_id = ObjectId(user_id)
-        else:
-            object_id = user_id
-            
-        user = self.collection.find_one({'_id': object_id})
-        if user:
-            user['_id'] = str(user['_id'])  # Convert ObjectId to string
-            user.pop('password_hash', None)  # Remove password hash from response
-        return user
-    except Exception as e:
-        print(f"Error getting user by ID: {str(e)}")
-        return None
-
-def update_last_login(self, user_id):
-    """Update user's last login timestamp"""
-    try:
-        # Handle both string and ObjectId inputs
-        if isinstance(user_id, str):
-            object_id = ObjectId(user_id)
-        else:
-            object_id = user_id
-            
-        self.collection.update_one(
-            {'_id': object_id},
-            {'$set': {'last_login': datetime.utcnow(), 'updated_at': datetime.utcnow()}}
-        )
-    except Exception as e:
-        print(f"Error updating last login: {str(e)}")
-
-def update_user(self, user_id, update_data):
-    """Update user information"""
-    try:
-        # Handle both string and ObjectId inputs
-        if isinstance(user_id, str):
-            object_id = ObjectId(user_id)
-        else:
-            object_id = user_id
-            
-        # Remove sensitive fields that shouldn't be updated directly
-        update_data.pop('password_hash', None)
-        update_data.pop('_id', None)
-        update_data.pop('created_at', None)
-        
-        update_data['updated_at'] = datetime.utcnow()
-        
-        result = self.collection.update_one(
-            {'_id': object_id},
-            {'$set': update_data}
-        )
-        
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"Error updating user: {str(e)}")
-        return False
-
-def delete_user(self, user_id):
-    """Soft delete user (set is_active to False)"""
-    try:
-        # Handle both string and ObjectId inputs
-        if isinstance(user_id, str):
-            object_id = ObjectId(user_id)
-        else:
-            object_id = user_id
-            
-        result = self.collection.update_one(
-            {'_id': object_id},
-            {'$set': {'is_active': False, 'updated_at': datetime.utcnow()}}
-        )
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"Error deleting user: {str(e)}")
-        return False

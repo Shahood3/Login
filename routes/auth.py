@@ -56,8 +56,20 @@ def register():
         # Get JSON data from request
         data = request.get_json()
         
+        # Debug: Print received data (remove passwords in production!)
+        print(f"Registration attempt - Data received: {data}")
+        
         if not data:
             return jsonify({'error': 'No data provided'}), 400
+        
+        # Check for required fields
+        required_fields = ['first_name', 'last_name', 'email', 'password', 'user_type']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            return jsonify({
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
         
         # Initialize user model
         from flask import g
@@ -66,11 +78,15 @@ def register():
         # Create user
         result, status_code = user_model.create_user(data)
         
+        print(f"Registration result: {result}, Status: {status_code}")
+        
         return jsonify(result), status_code
         
     except Exception as e:
         print(f"Registration error: {str(e)}")
-        return jsonify({'error': 'Registration failed'}), 500
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Registration failed', 'details': str(e)}), 500
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
@@ -79,11 +95,15 @@ def login():
         # Get JSON data from request
         data = request.get_json()
         
+        print(f"Login attempt - Data keys: {data.keys() if data else 'None'}")
+        
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
         email = data.get('email')
         password = data.get('password')
+        
+        print(f"Login attempt for email: {email}")
         
         if not email or not password:
             return jsonify({'error': 'Email and password are required'}), 400
@@ -97,14 +117,22 @@ def login():
         from flask import g
         user_model = User(g.mongo.db)
         
-        # Verify credentials
-        if not user_model.verify_password(email, password):
+        # Check if user exists first
+        user = user_model.get_user_by_email(email)
+        if not user:
+            print(f"User not found for email: {email}")
             return jsonify({'error': 'Invalid email or password'}), 401
         
-        # Get user data
-        user = user_model.get_user_by_email(email)
+        print(f"User found: {user.get('email')}, Active: {user.get('is_active')}")
         
-        if not user or not user.get('is_active'):
+        # Verify credentials
+        if not user_model.verify_password(email, password):
+            print(f"Password verification failed for: {email}")
+            return jsonify({'error': 'Invalid email or password'}), 401
+        
+        print(f"Password verified successfully for: {email}")
+        
+        if not user.get('is_active'):
             return jsonify({'error': 'Account is inactive'}), 401
         
         # Update last login
@@ -118,11 +146,10 @@ def login():
             'user_id': user_id_str,
             'email': user['email'],
             'user_type': user['user_type'],
-            'exp': datetime.utcnow() + timedelta(days=1)  # Token expires in 1 day
+            'exp': datetime.utcnow() + timedelta(days=1)
         }
         
         try:
-            # Use PyJWT 2.0+ compatible encoding
             token = jwt.encode(
                 token_payload, 
                 current_app.config['SECRET_KEY'], 
@@ -135,14 +162,14 @@ def login():
                 
         except Exception as jwt_error:
             print(f"JWT encoding error: {str(jwt_error)}")
-            print(f"SECRET_KEY exists: {bool(current_app.config.get('SECRET_KEY'))}")
-            print(f"SECRET_KEY type: {type(current_app.config.get('SECRET_KEY'))}")
             return jsonify({'error': 'Token generation failed'}), 500
         
-        # Remove sensitive data from user object and ensure _id is string
-        user_response = dict(user)  # Create a copy
+        # Remove sensitive data from user object
+        user_response = dict(user)
         user_response.pop('password_hash', None)
-        user_response['_id'] = user_id_str  # Ensure _id is string
+        user_response['_id'] = user_id_str
+        
+        print(f"Login successful for: {email}")
         
         return jsonify({
             'message': 'Login successful',
@@ -155,7 +182,7 @@ def login():
         print(f"Error type: {type(e)}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': 'Login failed'}), 500
+        return jsonify({'error': 'Login failed', 'details': str(e)}), 500
 
 @auth_bp.route('/logout', methods=['POST'])
 @token_required
@@ -182,13 +209,10 @@ def update_profile(current_user):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
-        # Initialize user model
         from flask import g
         user_model = User(g.mongo.db)
         
-        # Update user
         if user_model.update_user(current_user['_id'], data):
-            # Get updated user data
             updated_user = user_model.get_user_by_id(current_user['_id'])
             return jsonify({
                 'message': 'Profile updated successfully',
@@ -206,20 +230,15 @@ def update_profile(current_user):
 def get_users(current_user):
     """Get all users (manager only)"""
     try:
-        # Check if user is manager
         if current_user.get('user_type') != 'manager':
             return jsonify({'error': 'Access denied. Manager role required.'}), 403
         
-        # Get query parameters
         user_type = request.args.get('user_type')
         skip = int(request.args.get('skip', 0))
         limit = int(request.args.get('limit', 50))
         
-        # Initialize user model
         from flask import g
         user_model = User(g.mongo.db)
-        
-        # Get users
         result = user_model.get_all_users(user_type, skip, limit)
         
         return jsonify({
@@ -236,15 +255,11 @@ def get_users(current_user):
 def get_user_by_id(current_user, user_id):
     """Get user by ID (manager only or own profile)"""
     try:
-        # Check if user is manager or requesting own profile
         if current_user.get('user_type') != 'manager' and str(current_user['_id']) != user_id:
             return jsonify({'error': 'Access denied'}), 403
         
-        # Initialize user model
         from flask import g
         user_model = User(g.mongo.db)
-        
-        # Get user
         user = user_model.get_user_by_id(user_id)
         
         if not user:
@@ -264,19 +279,15 @@ def get_user_by_id(current_user, user_id):
 def delete_user(current_user, user_id):
     """Delete user (manager only)"""
     try:
-        # Check if user is manager
         if current_user.get('user_type') != 'manager':
             return jsonify({'error': 'Access denied. Manager role required.'}), 403
         
-        # Prevent deleting own account
         if str(current_user['_id']) == user_id:
             return jsonify({'error': 'Cannot delete your own account'}), 400
         
-        # Initialize user model
         from flask import g
         user_model = User(g.mongo.db)
         
-        # Delete user
         if user_model.delete_user(user_id):
             return jsonify({'message': 'User deleted successfully'}), 200
         else:
@@ -292,21 +303,18 @@ def verify_token():
     try:
         token = None
         
-        # Get token from header
         if 'Authorization' in request.headers:
             auth_header = request.headers['Authorization']
             try:
-                token = auth_header.split(" ")[1]  # Bearer <token>
+                token = auth_header.split(" ")[1]
             except IndexError:
                 return jsonify({'error': 'Invalid token format', 'valid': False}), 401
         
         if not token:
             return jsonify({'error': 'Token is missing', 'valid': False}), 401
         
-        # Decode token
         data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
         
-        # Get user from database
         from flask import g
         user_model = User(g.mongo.db)
         user = user_model.get_user_by_id(data['user_id'])

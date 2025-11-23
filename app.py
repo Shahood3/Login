@@ -1,35 +1,20 @@
 from flask import Flask, g
 from flask_cors import CORS
 from pymongo import MongoClient
-from dotenv import load_dotenv
-import os
-
-# Load environment variables
-load_dotenv()
+from config import Config
 
 def create_app():
     app = Flask(__name__)
     
-    # Configuration
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-    app.config['MONGO_URI'] = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-    app.config['DB_NAME'] = os.getenv('DB_NAME', 'login')
-    app.config['PORT'] = int(os.getenv('PORT', 8080))
+    # Load configuration from Config class
+    app.config.from_object(Config)
     
     # Validate SECRET_KEY
     if not app.config['SECRET_KEY']:
-        raise ValueError("SECRET_KEY must be set in environment variables")
+        raise ValueError("SECRET_KEY must be set in Config class")
     
     # CORS Configuration
-    cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
-    CORS(app, resources={
-        r"/api/*": {
-            "origins": cors_origins,
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
-        }
-    })
+    CORS(app, origins=Config.CORS_ORIGINS)
     
     # MongoDB Client (singleton)
     mongo_client = MongoClient(app.config['MONGO_URI'])
@@ -51,6 +36,14 @@ def create_app():
     # Register blueprints
     from routes.auth import auth_bp
     app.register_blueprint(auth_bp)
+
+
+
+    from routes.products import products_bp
+    from routes.rentals import rentals_bp
+
+    app.register_blueprint(products_bp)
+    app.register_blueprint(rentals_bp)
     
     # Health check endpoint
     @app.route('/health')
@@ -78,4 +71,4 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0',port=8080,debug=True)
+    app.run(host='0.0.0.0', port=Config.PORT, debug=True)
